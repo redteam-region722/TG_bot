@@ -74,23 +74,43 @@ class Database:
         """Authenticate a manager"""
         manager = self.managers.find_one({'user_id': user_id})
         if manager and manager.get('password') == password:
+            from datetime import timedelta
             self.managers.update_one(
                 {'user_id': user_id},
-                {'$set': {'is_authenticated': True}}
+                {'$set': {
+                    'is_authenticated': True,
+                    'authenticated_at': datetime.utcnow()
+                }}
             )
             return True
         return False
     
     def is_manager_authenticated(self, user_id):
-        """Check if manager is authenticated"""
+        """Check if manager is authenticated (within 30 minutes)"""
         manager = self.managers.find_one({'user_id': user_id})
-        return manager and manager.get('is_authenticated', False)
+        if not manager or not manager.get('is_authenticated', False):
+            return False
+        
+        # Check if authentication is still valid (30 minutes)
+        authenticated_at = manager.get('authenticated_at')
+        if authenticated_at:
+            from datetime import timedelta
+            time_since_auth = datetime.utcnow() - authenticated_at
+            if time_since_auth > timedelta(minutes=30):
+                # Session expired, logout
+                self.logout_manager(user_id)
+                return False
+        
+        return True
     
     def logout_manager(self, user_id):
         """Logout a manager"""
         self.managers.update_one(
             {'user_id': user_id},
-            {'$set': {'is_authenticated': False}}
+            {'$set': {
+                'is_authenticated': False,
+                'authenticated_at': None
+            }}
         )
     
     def get_all_managers(self):

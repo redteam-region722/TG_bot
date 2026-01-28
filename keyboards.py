@@ -23,8 +23,8 @@ def get_manager_menu_keyboard():
 def get_admin_menu_keyboard():
     """Main menu keyboard for admin"""
     keyboard = [
-        [KeyboardButton("/status")],
-        [KeyboardButton("/setting")]
+        [KeyboardButton("/post"), KeyboardButton("/pending")],
+        [KeyboardButton("/status"), KeyboardButton("/setting")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 

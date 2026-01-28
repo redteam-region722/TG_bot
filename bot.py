@@ -14,6 +14,7 @@ from datetime import datetime
 import config
 from database import db
 from keyboards import *
+from scheduler import PostScheduler
 
 # Enable logging
 logging.basicConfig(
@@ -29,11 +30,22 @@ WAITING_POST_TIME, WAITING_POST_CONFIRMATION = range(1, 3)
 class TelegramBot:
     def __init__(self):
         self.application = Application.builder().token(config.BOT_TOKEN).build()
+        self.scheduler = None
         self._setup_handlers()
     
     def _is_authorized(self, user_id):
         """Check if user is authorized (admin or manager)"""
-        return user_id == config.ADMIN_ID or user_id in config.MANAGER_IDS
+        # Check if admin
+        if user_id == config.ADMIN_ID:
+            return True
+        
+        # Check if in config file
+        if user_id in config.MANAGER_IDS:
+            return True
+        
+        # Check if in database
+        manager = db.get_manager(user_id)
+        return manager is not None
     
     def _get_channel_id(self, server_id):
         """Get channel ID for a server"""
@@ -290,7 +302,7 @@ class TelegramBot:
                 reply_markup=keyboard
             )
             
-        elif user.id in config.MANAGER_IDS:
+        elif user.id in config.MANAGER_IDS or db.get_manager(user.id):
             # Manager needs to authenticate first
             if db.is_manager_authenticated(user.id):
                 # Already authenticated, show manager menu
@@ -345,7 +357,7 @@ class TelegramBot:
                 "/logout - Logout from manager mode\n\n"
                 "You have full access to all features."
             )
-        elif user.id in config.MANAGER_IDS:
+        elif user.id in config.MANAGER_IDS or db.get_manager(user.id):
             help_text = (
                 "<b>📖 Manager Help & Commands</b>\n\n"
                 "<b>Manager Commands:</b>\n"
@@ -393,7 +405,7 @@ class TelegramBot:
         if not await self._check_authorization(update, context):
             return
         
-        if user.id not in config.MANAGER_IDS and user.id != config.ADMIN_ID:
+        if user.id not in config.MANAGER_IDS and user.id != config.ADMIN_ID and not db.get_manager(user.id):
             await update.message.reply_text("❌ You don't have manager access.")
             return ConversationHandler.END
         
@@ -460,7 +472,8 @@ class TelegramBot:
         if not await self._check_authorization(update, context):
             return
         
-        if not db.is_manager_authenticated(user.id) and user.id != config.ADMIN_ID:
+        # Admin doesn't need authentication, managers do
+        if user.id != config.ADMIN_ID and not db.is_manager_authenticated(user.id):
             await update.message.reply_text("❌ Please login as a manager first. Use /manager")
             return
         
@@ -551,7 +564,8 @@ class TelegramBot:
         if not await self._check_authorization(update, context):
             return
         
-        if not db.is_manager_authenticated(user.id) and user.id != config.ADMIN_ID:
+        # Admin doesn't need authentication, managers do
+        if user.id != config.ADMIN_ID and not db.is_manager_authenticated(user.id):
             await update.message.reply_text("❌ Please login as a manager first. Use /manager")
             return
         
@@ -617,7 +631,8 @@ class TelegramBot:
         if not await self._check_authorization(update, context):
             return
         
-        if not db.is_manager_authenticated(user.id) and user.id != config.ADMIN_ID:
+        # Admin doesn't need authentication, managers do
+        if user.id != config.ADMIN_ID and not db.is_manager_authenticated(user.id):
             await update.message.reply_text("❌ Please login as a manager first. Use /manager")
             return
         
@@ -806,7 +821,8 @@ class TelegramBot:
         if not await self._check_authorization(update, context):
             return
         
-        if not db.is_manager_authenticated(user.id) and user.id != config.ADMIN_ID:
+        # Admin doesn't need authentication, managers do
+        if user.id != config.ADMIN_ID and not db.is_manager_authenticated(user.id):
             await update.message.reply_text("❌ Please login as a manager first. Use /manager")
             return
         
@@ -2386,7 +2402,10 @@ class TelegramBot:
             password = config.MANAGER_PASSWORDS[idx] if idx < len(config.MANAGER_PASSWORDS) else "password"
             db.add_manager(manager_id, password=password)
         
-        # Scheduler removed - no feedback functionality
+        # Initialize and start scheduler for pending posts
+        self.scheduler = PostScheduler(self.application.bot)
+        self.scheduler.start()
+        logger.info("Scheduler started - pending posts will be processed every minute")
         
         # Start bot
         logger.info("Bot started")
